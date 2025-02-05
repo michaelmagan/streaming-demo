@@ -1,0 +1,31 @@
+{
+  "name": "streaming-demo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.0.4",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "zod": "latest",
+    "zod-stream": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "autoprefixer": "10.4.16",
+    "postcss": "8.4.31",
+    "tailwindcss": "3.3.3",
+    "typescript": "latest"
+  },
+  "keywords": [],
+  "author": "Michael Magan",
+  "license": "MIT",
+  "description": ""
+}
