@@ -12,6 +12,7 @@
     "next": "14.0.4",
     "react": "18.2.0",
     "react-dom": "18.2.0",
+    "schema-stream": "^3.2.2",
     "zod": "latest",
     "zod-stream": "^3.0.0"
   },

@@ -1,64 +1,112 @@
-import { z } from "zod";
+import { SchemaStream } from "schema-stream";
+import {
+  CompleteObjectSchema,
+  type CompleteObject,
+  type StreamResponse,
+} from "@/app/types/stream";
 
-const SimpleSchema = z.object({
-  title: z.string(),
-  description: z.string(),
-  status: z.string(),
-});
-
-type SimpleType = z.infer<typeof SimpleSchema>;
-
-async function* mockDataStream(): AsyncGenerator<SimpleType> {
-  const finalObject = {
-    title: "Building a Streaming Demo",
-    description:
-      "This is a demonstration of streaming JSON with multiple fields updating progressively.",
-    status: "Initializing... In Progress... Complete!",
-  };
-
-  let currentTitle = "";
-  let currentDesc = "";
-  let currentStatus = "Initializing";
-
-  // Stream title
-  for (const char of finalObject.title) {
-    currentTitle += char;
-    yield { title: currentTitle, description: "", status: currentStatus };
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  // Stream description
-  currentStatus = "In Progress";
-  for (const char of finalObject.description) {
-    currentDesc += char;
-    yield {
-      title: currentTitle,
-      description: currentDesc,
-      status: currentStatus,
-    };
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  // Final state
-  yield { title: currentTitle, description: currentDesc, status: "Complete!" };
-}
+// Create a sample complete object
+const completeObject: CompleteObject = {
+  message:
+    "This is a very long string that demonstrates streaming capabilities. It contains lots of information that will be chunked and validated. We're using schema-stream to ensure type safety while processing this data in chunks. This shows how we can handle large JSON objects efficiently.",
+  count: 42,
+  isEnabled: true,
+  status: "ACTIVE",
+  message2:
+    "This is a message that is long so that I can see how the stream handles it. It should be a lot longer than the other message, so that we can see how the stream handles it.",
+};
 
 export async function GET() {
   const encoder = new TextEncoder();
-  const readable = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const chunk of mockDataStream()) {
-          controller.enqueue(encoder.encode(JSON.stringify(chunk) + "\n"));
+  const decoder = new TextDecoder();
+
+  // Track paths and completion
+  const requiredFields = new Set([
+    "message",
+    "count",
+    "isEnabled",
+    "status",
+    "message2",
+  ]);
+  const completedFields = new Set<string>();
+  let activePath: (string | number)[] = [];
+  let completedPaths: (string | number)[][] = [];
+
+  // Create parser with path tracking
+  const parser = new SchemaStream(CompleteObjectSchema, {
+    typeDefaults: {
+      string: "",
+      number: 0,
+      boolean: false,
+    },
+    onKeyComplete: ({ activePath: current, completedPaths: completed }) => {
+      activePath = current.filter((p): p is string | number => p !== undefined);
+      completedPaths = completed
+        .map((path) =>
+          path.filter((p): p is string | number => p !== undefined)
+        )
+        .filter((path) => path.length > 0);
+
+      // Track field completion
+      completedPaths.forEach((path) => {
+        if (path.length === 1 && typeof path[0] === "string") {
+          completedFields.add(path[0]);
         }
-        controller.close();
-      } catch (error) {
-        controller.error(error);
-      }
+      });
     },
   });
 
-  return new Response(readable, {
+  // Create streams pipeline
+  const stream = new ReadableStream({
+    start(controller) {
+      const jsonString = JSON.stringify(completeObject);
+      let position = 0;
+      const chunkSize = 5; // Characters per chunk
+
+      function emitChunk() {
+        if (position >= jsonString.length) {
+          controller.close();
+          return;
+        }
+
+        // Get next chunk
+        const chunk = jsonString.slice(position, position + chunkSize);
+        controller.enqueue(encoder.encode(chunk));
+        position += chunkSize;
+        setTimeout(emitChunk, 50);
+      }
+
+      emitChunk();
+    },
+  })
+    .pipeThrough(parser.parse({ handleUnescapedNewLines: true }))
+    .pipeThrough(
+      new TransformStream({
+        transform(chunk, controller) {
+          try {
+            const result = JSON.parse(decoder.decode(chunk));
+            const response: StreamResponse = {
+              chunk: "",
+              bytesProcessed: chunk.length,
+              timestamp: Date.now(),
+              data: result,
+              _meta: {
+                _activePath: activePath,
+                _completedPaths: completedPaths,
+                _isComplete: Array.from(requiredFields).every((field) =>
+                  completedFields.has(field)
+                ),
+              },
+            };
+            controller.enqueue(encoder.encode(JSON.stringify(response) + "\n"));
+          } catch (e) {
+            console.error("Error in transform:", e);
+          }
+        },
+      })
+    );
+
+  return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
